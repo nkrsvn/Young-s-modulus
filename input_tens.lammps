@@ -1,0 +1,81 @@
+#package gpu 1
+
+units real
+dimension      3
+processors     * * *
+boundary       p p p
+atom_style     full
+#pair_style      lj/cut/coul/long/gpu 10
+pair_style      lj/cut/coul/long 10
+bond_style      harmonic
+angle_style     harmonic
+dihedral_style  harmonic
+improper_style umbrella
+kspace_style    pppm 1.0e-4
+
+#special_bonds   dreiding
+pair_modify     tail yes mix arithmetic
+neigh_modify one 10000
+# read the original positions for the atoms of the PEG molecule, as well as the same parameter file as previously
+read_data cooling_38000_3.data
+
+replicate      2 2 2
+
+# THERMALIZATION
+timestep 1
+fix 1 all npt temp 200 300 100 iso 1 1 1000 
+
+# Set thermo output
+thermo 1000
+thermo_style custom step lx ly lz press pxx pyy pzz pe temp
+
+run 100000
+unfix 1
+
+# EQUILIBRATION
+timestep 1
+fix 1 all npt temp 300 300 100 iso 1 1 1000 
+
+# Set thermo output
+thermo 1000
+thermo_style custom step lx ly lz press pxx pyy pzz pe temp
+
+# Run for at least 10 picosecond (assuming 1 fs timestep)
+run 10000
+unfix 1
+
+# Store final cell length for strain calculations
+variable tmp equal "ly"
+variable L0 equal ${tmp}
+print "Initial Length, L0: ${L0}"
+
+######################################
+# DEFORMATION
+reset_timestep	0
+timestep 0.5
+
+fix		1 all npt temp 300 300 100 x 1 1 1000 z 1 1 1000
+fix		2 all deform 1 y erate 0.0001 units box remap x
+dump mydmp all atom 1000 def.lammpstrj
+
+# Output strain and stress info to file
+# for units real, pressure is in [athmospheres] ~ 100 [kPa] = 1/10000 [GPa]
+# p2, p3, p4 are in GPa
+variable strain equal "(ly - v_L0)/v_L0"
+variable p1 equal "v_strain"
+variable p2 equal "-pxx/10000*1.01325"
+variable p3 equal "-pyy/10000*1.01325"
+variable p4 equal "-pzz/10000*1.01325"
+fix def1 all print 100 "${p1} ${p2} ${p3} ${p4}" file def1.txt screen no
+
+# Display thermo
+thermo 	1000
+thermo_style	custom step v_strain temp v_p2 v_p3 v_p4 ke pe press
+
+run		40000
+
+write_data def.data
+
+######################################
+# SIMULATION DONE
+print "All done"
